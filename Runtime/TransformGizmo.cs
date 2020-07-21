@@ -164,7 +164,7 @@ namespace RuntimeGizmos
 				SetNearAxis();
 			}
 			
-			GetTarget();
+			//GetTarget();
 
 			if(mainTargetRoot == null) return;
 			
