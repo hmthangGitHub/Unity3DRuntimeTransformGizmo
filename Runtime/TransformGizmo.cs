@@ -13,6 +13,9 @@ namespace RuntimeGizmos
 	[RequireComponent(typeof(Camera))]
 	public class TransformGizmo : MonoBehaviour
 	{
+        public event Action TransformationStarted;
+        public event Action TransformationStopped;
+
 		public TransformSpace space = TransformSpace.Global;
 		public TransformType transformType = TransformType.Move;
 		public TransformPivot pivot = TransformPivot.Pivot;
@@ -163,11 +166,9 @@ namespace RuntimeGizmos
 			}else{
 				SetNearAxis();
 			}
-			
-			//GetTarget();
 
 			if(mainTargetRoot == null) return;
-			
+
 			TransformSelected();
 		}
 
@@ -353,17 +354,24 @@ namespace RuntimeGizmos
 		{
 			if(mainTargetRoot != null)
 			{
-				if(nearAxis != Axis.None && Input.GetMouseButtonDown(0))
-				{
-					StartCoroutine(TransformSelected(translatingType));
+				if(nearAxis != Axis.None &&
+#if UNITY_STANDALONE || UNITY_EDITOR
+                Input.GetMouseButtonDown(0)
+#elif UNITY_ANDROID
+                 Input.touchCount == 1 && Input.touches[0].phase == TouchPhase.Began
+#endif
+                )
+                {
+                    StartCoroutine(TransformSelected(translatingType));
 				}
 			}
 		}
-		
+
 		IEnumerator TransformSelected(TransformType transType)
 		{
 			isTransforming = true;
-			totalScaleAmount = 0;
+            TransformationStarted?.Invoke();
+            totalScaleAmount = 0;
 			totalRotationAmount = Quaternion.identity;
 
 			Vector3 originalPivot = pivotPoint;
@@ -378,19 +386,29 @@ namespace RuntimeGizmos
 			float currentSnapRotationAmount = 0;
 			float currentSnapScaleAmount = 0;
 
-			List<ICommand> transformCommands = new List<ICommand>();
+            List<ICommand> transformCommands = new List<ICommand>();
 			for(int i = 0; i < targetRootsOrdered.Count; i++)
 			{
 				transformCommands.Add(new TransformCommand(this, targetRootsOrdered[i]));
 			}
 
-			while(!Input.GetMouseButtonUp(0))
-			{
-				Ray mouseRay = myCamera.ScreenPointToRay(Input.mousePosition);
-				Vector3 mousePosition = Geometry.LinePlaneIntersect(mouseRay.origin, mouseRay.direction, originalPivot, planeNormal);
+			while(
+#if UNITY_STANDALONE || UNITY_EDITOR
+                !Input.GetMouseButtonUp(0)
+#elif UNITY_ANDROID
+                Input.touchCount == 1 && Input.touches[0].phase != TouchPhase.Ended
+#endif
+                )
+            {
+#if UNITY_STANDALONE || UNITY_EDITOR
+                Ray mouseRay = myCamera.ScreenPointToRay(Input.mousePosition);
+#elif UNITY_ANDROID
+                Ray mouseRay = myCamera.ScreenPointToRay(Input.GetTouch(0).position);
+#endif
+                Vector3 mousePosition = Geometry.LinePlaneIntersect(mouseRay.origin, mouseRay.direction, originalPivot, planeNormal);
 				bool isSnapping = Input.GetKey(translationSnapping);
 
-				if(previousMousePosition != Vector3.zero && mousePosition != Vector3.zero)
+                if (previousMousePosition != Vector3.zero && mousePosition != Vector3.zero)
 				{
 					if(transType == TransformType.Move)
 					{
@@ -513,8 +531,12 @@ namespace RuntimeGizmos
 
 						if(nearAxis == Axis.Any)
 						{
-							Vector3 rotation = transform.TransformDirection(new Vector3(Input.GetAxis("Mouse Y"), -Input.GetAxis("Mouse X"), 0));
-							Quaternion.Euler(rotation).ToAngleAxis(out rotateAmount, out rotationAxis);
+#if UNITY_STANDALONE || UNITY_EDITOR
+                            Vector3 rotation = transform.TransformDirection(new Vector3(Input.GetAxis("Mouse Y"), -Input.GetAxis("Mouse X"), 0));
+#elif UNITY_ANDROID
+                            Vector3 rotation = transform.TransformDirection(new Vector3(Input.GetTouch(0).deltaPosition.y, -Input.GetTouch(0).deltaPosition.x, 0));
+#endif
+                            Quaternion.Euler(rotation).ToAngleAxis(out rotateAmount, out rotationAxis);
 							rotateAmount *= allRotateSpeedMultiplier;
 						}else{
 							if(circularRotationMethod)
@@ -576,6 +598,7 @@ namespace RuntimeGizmos
 			totalRotationAmount = Quaternion.identity;
 			totalScaleAmount = 0;
 			isTransforming = false;
+            TransformationStopped?.Invoke();
 			SetTranslatingAxis(transformType, Axis.None);
 
 			SetPivotPoint();
@@ -672,7 +695,7 @@ namespace RuntimeGizmos
 				if(addCommand) UndoRedoManager.Insert(new AddTargetCommand(this, target, targetRootsOrdered));
 
 				AddTargetRoot(target);
-				AddTargetHighlightedRenderers(target);
+				//AddTargetHighlightedRenderers(target);
 
 				SetPivotPoint();
 			}
@@ -686,7 +709,7 @@ namespace RuntimeGizmos
 
 				if(addCommand) UndoRedoManager.Insert(new RemoveTargetCommand(this, target));
 
-				RemoveTargetHighlightedRenderers(target);
+				//RemoveTargetHighlightedRenderers(target);
 				RemoveTargetRoot(target);
 
 				SetPivotPoint();
@@ -1014,17 +1037,35 @@ namespace RuntimeGizmos
 			else if(zClosestDistance <= minSelectedDistanceCheck && zClosestDistance <= xClosestDistance && zClosestDistance <= yClosestDistance) SetTranslatingAxis(type, Axis.Z);
 			else if(type == TransformType.Rotate && mainTargetRoot != null)
 			{
-				Ray mouseRay = myCamera.ScreenPointToRay(Input.mousePosition);
-				Vector3 mousePlaneHit = Geometry.LinePlaneIntersect(mouseRay.origin, mouseRay.direction, pivotPoint, (transform.position - pivotPoint).normalized);
+#if UNITY_STANDALONE || UNITY_EDITOR
+                Ray mouseRay = myCamera.ScreenPointToRay(Input.mousePosition);
+#elif UNITY_ANDROID
+                if (Input.touchCount != 1)
+                {
+                    return;
+                }
+
+                Ray mouseRay = myCamera.ScreenPointToRay(Input.GetTouch(0).position);
+#endif
+                Vector3 mousePlaneHit = Geometry.LinePlaneIntersect(mouseRay.origin, mouseRay.direction, pivotPoint, (transform.position - pivotPoint).normalized);
 				if((pivotPoint - mousePlaneHit).sqrMagnitude <= (GetHandleLength(TransformType.Rotate)).Squared()) SetTranslatingAxis(type, Axis.Any);
 			}
 		}
 
 		float ClosestDistanceFromMouseToLines(List<Vector3> lines)
 		{
-			Ray mouseRay = myCamera.ScreenPointToRay(Input.mousePosition);
+#if UNITY_STANDALONE || UNITY_EDITOR
+            Ray mouseRay = myCamera.ScreenPointToRay(Input.mousePosition);
+#elif UNITY_ANDROID
+            if (Input.touchCount != 1)
+            {
+                return float.MaxValue;
+            }
 
-			float closestDistance = float.MaxValue;
+            Ray mouseRay = myCamera.ScreenPointToRay(Input.GetTouch(0).position);
+#endif
+
+            float closestDistance = float.MaxValue;
 			for(int i = 0; i + 1 < lines.Count; i++)
 			{
 				IntersectPoints points = Geometry.ClosestPointsOnSegmentToLine(lines[i], lines[i + 1], mouseRay.origin, mouseRay.direction);
@@ -1043,9 +1084,18 @@ namespace RuntimeGizmos
 
 			if(planePoints.Count >= 4)
 			{
-				Ray mouseRay = myCamera.ScreenPointToRay(Input.mousePosition);
+#if UNITY_STANDALONE || UNITY_EDITOR
+                Ray mouseRay = myCamera.ScreenPointToRay(Input.mousePosition);
+#elif UNITY_ANDROID
+                if (Input.touchCount != 1)
+                {
+                    return closestDistance;
+                }
 
-				for(int i = 0; i < planePoints.Count; i += 4)
+                Ray mouseRay = myCamera.ScreenPointToRay(Input.GetTouch(0).position);
+#endif
+
+                for (int i = 0; i < planePoints.Count; i += 4)
 				{
 					Plane plane = new Plane(planePoints[i], planePoints[i + 1], planePoints[i + 2]);
 
