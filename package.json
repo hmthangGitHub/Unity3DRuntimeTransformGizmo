@@ -6,7 +6,7 @@
   "description": "A runtime transform gizmo similar to unitys editor so you can translate (move, rotate, scale) objects at runtime.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/hmthangGitHub/Unity3DRuntimeTransformGizmo/tree/feature/upm-package"
+    "url": "https://github.com/hmthangGitHub/Unity3DRuntimeTransformGizmo.git"
   },
   "author": "HiddenMonk",
   "hideInEditor": false,
